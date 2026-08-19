@@ -16,6 +16,15 @@ try:
 except Exception:
     PLOTLY_AVAILABLE = False
 
+# Matplotlib fallback when Plotly is not available
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except Exception:
+    MATPLOTLIB_AVAILABLE = False
+
 # Collect plot diagnostics to help debug plotting/display issues in cloud environments
 plot_diagnostics = []
 
@@ -110,6 +119,40 @@ def draw_pca_plot(projection: np.ndarray, labels: Optional[np.ndarray], title: s
     except Exception as e:
         # Record the error for diagnostics and return None so the caller can fallback
         plot_diagnostics.append(f"draw_pca_plot error: {e}")
+        return None
+
+
+def draw_pca_matplotlib(projection: np.ndarray, labels: Optional[np.ndarray], title: str):
+    """Render PCA projection using matplotlib and return PNG bytes."""
+    if not MATPLOTLIB_AVAILABLE:
+        return None
+    try:
+        import io
+        fig, ax = plt.subplots(figsize=(8, 6))
+        if projection.shape[1] >= 2:
+            xs = projection[:, 0]
+            ys = projection[:, 1]
+            ax.scatter(xs, ys, s=50, alpha=0.8)
+            if labels is not None:
+                for x, y, label in zip(xs, ys, labels):
+                    ax.annotate(str(label), (x, y), xytext=(4, 4), textcoords="offset points", fontsize=8)
+            ax.set_xlabel('PC1')
+            ax.set_ylabel('PC2')
+            ax.set_title(title)
+        else:
+            xs = projection[:, 0]
+            ax.bar(range(len(xs)), xs)
+            ax.set_xlabel('sample')
+            ax.set_ylabel('PC1')
+            ax.set_title(title)
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format='png', dpi=150)
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception as e:
+        plot_diagnostics.append(f"draw_pca_matplotlib error: {e}")
         return None
 
 
@@ -222,18 +265,19 @@ if uploaded_file is not None:
                     projection, variance = compute_pca(X, n_components=n_components)
                 # clustering for coloring
                 clusters = compute_clusters(X, n_clusters=n_clusters)
+                # Try Plotly first
                 fig = draw_pca_plot(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of {uploaded_file.name}")
-                if fig is not None:
+                if fig is not None and PLOTLY_AVAILABLE:
                     # add cluster coloring
                     try:
                         fig.data[0].marker.color = clusters
                     except Exception:
                         pass
-                    # Attempt to display the Plotly figure; on failure try HTML embed or table fallback
                     try:
                         st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
                         plot_diagnostics.append(f"st.plotly_chart error (uploaded): {e}")
+                        # try HTML embed
                         try:
                             tmp_html = Path(tempfile.gettempdir()) / "pca_plot_uploaded.html"
                             fig.write_html(str(tmp_html))
@@ -241,16 +285,31 @@ if uploaded_file is not None:
                             components.html(html_str, height=600)
                         except Exception as e2:
                             plot_diagnostics.append(f"fig.write_html/embed error (uploaded): {e2}")
-                            st.warning("Could not render interactive Plotly figure; showing PCA coordinates table instead.")
+                            st.warning("Could not render interactive Plotly figure; falling back to matplotlib or table.")
+                            # fall through to matplotlib/table fallback
+                            fig = None
+                # If Plotly unavailable or failed, try matplotlib
+                if (not PLOTLY_AVAILABLE or fig is None):
+                    if MATPLOTLIB_AVAILABLE:
+                        try:
+                            png_bytes = draw_pca_matplotlib(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of {uploaded_file.name}")
+                            if png_bytes is not None:
+                                st.image(png_bytes, use_container_width=True)
+                            else:
+                                raise RuntimeError("matplotlib produced no image bytes")
+                        except Exception as e:
+                            plot_diagnostics.append(f"matplotlib fallback error (uploaded): {e}")
+                            st.warning("Could not render PCA image; showing PCA coordinates as a table instead.")
                             pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
                             pca_tbl.insert(0, "label", list(headers))
                             pca_tbl["cluster"] = clusters
                             st.dataframe(pca_tbl)
-                else:
-                    pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-                    pca_tbl.insert(0, "label", list(headers))
-                    pca_tbl["cluster"] = clusters
-                    st.dataframe(pca_tbl)
+                    else:
+                        # No plotting libraries available — show table
+                        pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                        pca_tbl.insert(0, "label", list(headers))
+                        pca_tbl["cluster"] = clusters
+                        st.dataframe(pca_tbl)
 
                 st.subheader("PCA results")
                 st.write("Explained variance ratios:")
@@ -290,12 +349,11 @@ elif use_example:
                     projection, variance = compute_pca(X, n_components=n_components)
                 clusters = compute_clusters(X, n_clusters=n_clusters)
                 fig = draw_pca_plot(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of example")
-                if fig is not None:
+                if fig is not None and PLOTLY_AVAILABLE:
                     try:
                         fig.data[0].marker.color = clusters
                     except Exception:
                         pass
-                    # Attempt to display the Plotly figure; on failure try HTML embed or table fallback
                     try:
                         st.plotly_chart(fig, use_container_width=True)
                     except Exception as e:
@@ -307,16 +365,27 @@ elif use_example:
                             components.html(html_str, height=600)
                         except Exception as e2:
                             plot_diagnostics.append(f"fig.write_html/embed error (example): {e2}")
-                            st.warning("Could not render interactive Plotly figure; showing PCA coordinates table instead.")
+                            fig = None
+                if (not PLOTLY_AVAILABLE or fig is None):
+                    if MATPLOTLIB_AVAILABLE:
+                        try:
+                            png_bytes = draw_pca_matplotlib(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of example")
+                            if png_bytes is not None:
+                                st.image(png_bytes, use_container_width=True)
+                            else:
+                                raise RuntimeError("matplotlib produced no image bytes")
+                        except Exception as e:
+                            plot_diagnostics.append(f"matplotlib fallback error (example): {e}")
+                            st.warning("Could not render PCA image; showing PCA coordinates as a table instead.")
                             pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
                             pca_tbl.insert(0, "label", list(headers))
                             pca_tbl["cluster"] = clusters
                             st.dataframe(pca_tbl)
-                else:
-                    pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-                    pca_tbl.insert(0, "label", list(headers))
-                    pca_tbl["cluster"] = clusters
-                    st.dataframe(pca_tbl)
+                    else:
+                        pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                        pca_tbl.insert(0, "label", list(headers))
+                        pca_tbl["cluster"] = clusters
+                        st.dataframe(pca_tbl)
 
                 st.subheader("PCA results")
                 st.write("Explained variance ratios:")
