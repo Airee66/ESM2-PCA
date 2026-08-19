@@ -118,8 +118,8 @@ with st.sidebar:
     st.caption(f"Using {model_name} with mean-pooled sequence embeddings.")
 
 uploaded_file = st.file_uploader("Drop a FASTA file here", type=["fasta", "fa", "faa", "txt"])
-# Provide a quick example option that uses the included example_20_sequences.fasta in the repo
-use_example = st.button("Use example FASTA (20 sequences)")
+# Provide a quick example option that uses the included ha_random_20_cow_chicken_human.fasta in the repo
+use_example = st.button("Use example FASTA (ha_random_20, 60 sequences)")
 
 # Helper to process a fasta file path (already on disk) and run the same pipeline as the uploader
 def _process_fasta_on_disk(fasta_path: Path, display_name: str):
@@ -259,9 +259,9 @@ elif use_example:
             )
     else:
         # Fallback: if cache missing, run the extractor as before
-        example_src = REPO_ROOT / "example_20_sequences.fasta"
+        example_src = REPO_ROOT / "ha_random_20_cow_chicken_human.fasta"
         if not example_src.exists():
-            st.error("Example FASTA not found in the repository. Please ensure example_20_sequences.fasta exists.")
+            st.error("Example FASTA not found in the repository. Please ensure ha_random_20_cow_chicken_human.fasta exists.")
         else:
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmpdir_path = Path(tmpdir)
