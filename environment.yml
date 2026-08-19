@@ -17,6 +17,9 @@ dependencies:
   # Install PyTorch from the pytorch channel. By default this will install a CPU build.
   # For GPU, set cudatoolkit to a version that matches your CUDA driver (e.g., cudatoolkit=11.8).
   - pytorch
+  # Add ML/plotting packages via conda to ensure they're present in cloud builds
+  - scikit-learn
+  - matplotlib
   # Uncomment and set cudatoolkit if you want a CUDA-enabled PyTorch via conda:
   # - cudatoolkit=11.8
   - pip:
