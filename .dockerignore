@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.venv/
+venv/
+__pycache__/
+instance/
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+*.egg
+.git/
+.gitignore
+Dockerfile
+
+# Keep example_cache in the image for demo convenience — remove if you'd rather not include precomputed files
+# example_cache/
