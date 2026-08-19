@@ -187,10 +187,30 @@ elif use_example:
     cache_dir = REPO_ROOT / "example_cache"
     if cache_dir.exists():
         st.success("Using cached PCA results for the example FASTA (no model run).")
-        # Show cached PCA plot if available
+        # Show cached PCA plot if available (defensive display to avoid runtime errors on some hosts)
         plot_path = cache_dir / "pca_plot.png"
         if plot_path.exists():
-            st.image(str(plot_path), caption="PCA plot (cached)", use_column_width=True)
+            try:
+                # Try passing the file path (works in most environments)
+                st.image(str(plot_path), caption="PCA plot (cached)", use_column_width=True)
+            except Exception:
+                try:
+                    # Fall back to reading bytes and passing bytes to st.image
+                    img_bytes = plot_path.read_bytes()
+                    st.image(img_bytes, caption="PCA plot (cached)", use_column_width=True)
+                except Exception as e:
+                    st.warning(f"Could not display cached PCA image: {e}")
+                    # Offer the file for download as a last resort
+                    try:
+                        data_bytes = plot_path.read_bytes()
+                        st.download_button(
+                            label="Download cached PCA plot (PNG)",
+                            data=data_bytes,
+                            file_name=plot_path.name,
+                            mime="image/png",
+                        )
+                    except Exception:
+                        st.write(f"Cached PCA plot available at: {plot_path}")
 
         # Show PCA projection table if available
         proj_csv = cache_dir / "pca_projection.csv"
