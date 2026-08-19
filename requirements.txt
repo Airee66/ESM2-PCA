@@ -2,13 +2,12 @@
 fair-esm
 torch
 numpy
-scikit-learn
-matplotlib
+scikit-learn==1.9.0
+matplotlib==3.7.2
 pandas
 streamlit
 plotly
 
-# Ensure matplotlib and scikit-learn are explicitly requested for Streamlit Cloud
-# (these are required for the PNG fallback and PCA computation)
-scikit-learn
-matplotlib
+# Explicit pins to help Streamlit Cloud pick prebuilt wheels for these packages
+scikit-learn==1.9.0
+matplotlib==3.7.2
