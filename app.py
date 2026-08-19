@@ -6,12 +6,10 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+import plotly.express as px
 from sklearn.decomposition import PCA
 
 
@@ -59,22 +57,22 @@ def compute_pca(X: np.ndarray, n_components: int = 2):
 
 
 def draw_pca_plot(projection: np.ndarray, labels: Optional[np.ndarray], title: str):
-    fig, ax = plt.subplots(figsize=(8, 6))
-    xs = projection[:, 0]
-    ys = projection[:, 1]
-
+    # Use Plotly for interactive and lightweight plotting in Streamlit
+    df = pd.DataFrame(projection, columns=["PC1", "PC2"] if projection.shape[1] >= 2 else ["PC1"])  # type: ignore
     if labels is not None:
-        for x, y, label in zip(xs, ys, labels):
-            ax.scatter(x, y, s=60, alpha=0.8)
-            ax.annotate(str(label), (x, y), xytext=(5, 5), textcoords="offset points", fontsize=8)
+        df.insert(0, "label", labels)
+        hover_data = {"label": True}
     else:
-        ax.scatter(xs, ys, s=60, alpha=0.8)
+        hover_data = None
 
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    ax.set_title(title)
-    ax.grid(alpha=0.2)
-    fig.tight_layout()
+    if projection.shape[1] >= 2:
+        fig = px.scatter(df, x="PC1", y="PC2", text=(df["label"] if "label" in df.columns else None), title=title)
+        fig.update_traces(textposition="top center")
+    else:
+        # Single-component fallback: show as bar chart
+        fig = px.bar(df, x=df.index, y="PC1", text=(df["label"] if "label" in df.columns else None), title=title)
+
+    fig.update_layout(width=800, height=600)
     return fig
 
 
@@ -110,7 +108,7 @@ if uploaded_file is not None:
                 projection, variance = compute_pca(X, n_components=n_components)
 
             fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of {uploaded_file.name}")
-            st.pyplot(fig)
+            st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("PCA results")
             st.write("Explained variance ratios:")
