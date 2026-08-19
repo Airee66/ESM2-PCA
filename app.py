@@ -9,7 +9,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.express as px
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except Exception:
+    PLOTLY_AVAILABLE = False
 from sklearn.decomposition import PCA
 
 
@@ -57,6 +61,10 @@ def compute_pca(X: np.ndarray, n_components: int = 2):
 
 
 def draw_pca_plot(projection: np.ndarray, labels: Optional[np.ndarray], title: str):
+    # If Plotly isn't available in the runtime, return None so caller can fall back
+    if not PLOTLY_AVAILABLE:
+        return None
+
     # Use Plotly for interactive and lightweight plotting in Streamlit
     df = pd.DataFrame(projection, columns=["PC1", "PC2"] if projection.shape[1] >= 2 else ["PC1"])  # type: ignore
     if labels is not None:
@@ -108,7 +116,14 @@ if uploaded_file is not None:
                 projection, variance = compute_pca(X, n_components=n_components)
 
             fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of {uploaded_file.name}")
-            st.plotly_chart(fig, use_container_width=True)
+            if fig is not None:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
+                pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                if labels is not None:
+                    pca_tbl.insert(0, "label", labels.tolist())
+                st.dataframe(pca_tbl)
 
             st.subheader("PCA results")
             st.write("Explained variance ratios:")
