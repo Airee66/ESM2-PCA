@@ -14,7 +14,6 @@ try:
     PLOTLY_AVAILABLE = True
 except Exception:
     PLOTLY_AVAILABLE = False
-from sklearn.decomposition import PCA
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -53,11 +52,35 @@ def extract_fasta_embeddings(fasta_path: Path, out_dir: Path):
 
 
 def compute_pca(X: np.ndarray, n_components: int = 2):
+    """Compute PCA projection. Try scikit-learn if available, otherwise fall back to a NumPy SVD implementation.
+
+    Returns:
+        projection: (n_samples, n_components) array
+        explained_variance_ratio: length-n_components array
+    """
     if X.shape[0] < 2:
         raise ValueError("At least 2 sequences are required to compute PCA.")
-    pca = PCA(n_components=n_components, random_state=0)
-    projection = pca.fit_transform(X)
-    return projection, pca.explained_variance_ratio_
+
+    # Prefer scikit-learn when available for stability and feature parity
+    try:
+        from sklearn.decomposition import PCA as SKPCA
+
+        pca = SKPCA(n_components=n_components, random_state=0)
+        projection = pca.fit_transform(X)
+        return projection, pca.explained_variance_ratio_
+    except Exception:
+        # Fallback: compute PCA via SVD on mean-centered data
+        Xc = X - np.mean(X, axis=0, keepdims=True)
+        # compute compact SVD
+        U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
+        components = Vt[:n_components]
+        projection = Xc.dot(components.T)
+        # compute explained variance ratio from singular values
+        # variance per component = (S**2) / (n_samples - 1)
+        var_comp = (S ** 2) / max(1, (X.shape[0] - 1))
+        total_var = var_comp.sum()
+        explained = (var_comp[:n_components] / total_var) if total_var > 0 else np.zeros(n_components)
+        return projection, explained
 
 
 def draw_pca_plot(projection: np.ndarray, labels: Optional[np.ndarray], title: str):
