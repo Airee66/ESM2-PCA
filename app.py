@@ -434,3 +434,19 @@ with st.expander("Advanced: Plot diagnostics (click to expand)"):
             st.write(d)
     else:
         st.write("No plot diagnostics recorded yet.")
+
+    # Add a runtime package inspector to list installed packages in the app instance
+    if st.button("Show installed Python packages (pip list)"):
+        import subprocess, sys
+        try:
+            out = subprocess.check_output([sys.executable, "-m", "pip", "list"], stderr=subprocess.STDOUT, text=True, timeout=60)
+            st.text_area("pip list output", out, height=300)
+        except Exception as e:
+            st.write("Failed to run pip list:", e)
+
+    if st.button("Show sys.path and python version"):
+        import sys
+        st.write({"python": sys.executable, "version": sys.version})
+        st.write("sys.path:")
+        for p in sys.path:
+            st.write(p)
