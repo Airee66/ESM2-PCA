@@ -183,16 +183,72 @@ if uploaded_file is not None:
         _process_fasta_on_disk(fasta_path, uploaded_file.name)
 
 elif use_example:
-    example_src = REPO_ROOT / "example_20_sequences.fasta"
-    if not example_src.exists():
-        st.error("Example FASTA not found in the repository. Please ensure example_20_sequences.fasta exists.")
+    # Prefer using a cached precomputed PCA + embeddings for the example to avoid running the model on cloud hosts.
+    cache_dir = REPO_ROOT / "example_cache"
+    if cache_dir.exists():
+        st.success("Using cached PCA results for the example FASTA (no model run).")
+        # Show cached PCA plot if available
+        plot_path = cache_dir / "pca_plot.png"
+        if plot_path.exists():
+            st.image(str(plot_path), caption="PCA plot (cached)", use_column_width=True)
+
+        # Show PCA projection table if available
+        proj_csv = cache_dir / "pca_projection.csv"
+        if proj_csv.exists():
+            pca_df = pd.read_csv(proj_csv)
+            st.subheader("PCA projection (cached)")
+            st.dataframe(pca_df, use_container_width=True)
+            st.download_button(
+                label="Download cached PCA coordinates (.csv)",
+                data=proj_csv.read_text(encoding="utf-8"),
+                file_name="example_esm2_pca_projection.csv",
+                mime="text/csv",
+            )
+
+        # Show explained variance if available
+        var_csv = cache_dir / "pca_variance.csv"
+        if var_csv.exists():
+            var_df = pd.read_csv(var_csv)
+            st.subheader("Explained variance (cached)")
+            st.dataframe(var_df, use_container_width=True)
+            st.download_button(
+                label="Download cached explained variance (.csv)",
+                data=var_csv.read_text(encoding="utf-8"),
+                file_name="example_esm2_pca_variance.csv",
+                mime="text/csv",
+            )
+
+        # Provide embeddings download (convert .npy to CSV on the fly for convenience)
+        emb_npy = cache_dir / "embeddings.npy"
+        labels_csv = cache_dir / "labels.csv"
+        if emb_npy.exists():
+            X = np.load(emb_npy)
+            emb_csv_text = pd.DataFrame(X).to_csv(index=False)
+            st.download_button(
+                label="Download cached embeddings (.csv)",
+                data=emb_csv_text,
+                file_name="example_esm2_embeddings.csv",
+                mime="text/csv",
+            )
+        if labels_csv.exists():
+            st.download_button(
+                label="Download cached labels (.csv)",
+                data=labels_csv.read_text(encoding="utf-8"),
+                file_name="example_esm2_labels.csv",
+                mime="text/csv",
+            )
     else:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            fasta_path = tmpdir_path / example_src.name
-            # copy the example fasta into a temp dir so extractor writes outputs there
-            fasta_path.write_text(example_src.read_text(encoding="utf-8"), encoding="utf-8")
-            _process_fasta_on_disk(fasta_path, example_src.name)
+        # Fallback: if cache missing, run the extractor as before
+        example_src = REPO_ROOT / "example_20_sequences.fasta"
+        if not example_src.exists():
+            st.error("Example FASTA not found in the repository. Please ensure example_20_sequences.fasta exists.")
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmpdir_path = Path(tmpdir)
+                fasta_path = tmpdir_path / example_src.name
+                # copy the example fasta into a temp dir so extractor writes outputs there
+                fasta_path.write_text(example_src.read_text(encoding="utf-8"), encoding="utf-8")
+                _process_fasta_on_disk(fasta_path, example_src.name)
 
 else:
     st.info("Upload a FASTA file to begin, or click 'Use example FASTA (20 sequences)'. The app will compute mean-pooled ESM-2 embeddings, run PCA, and display the results.")
