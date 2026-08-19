@@ -9,11 +9,15 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 try:
     import plotly.express as px
     PLOTLY_AVAILABLE = True
 except Exception:
     PLOTLY_AVAILABLE = False
+
+# Collect plot diagnostics to help debug plotting/display issues in cloud environments
+plot_diagnostics = []
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -92,19 +96,21 @@ def draw_pca_plot(projection: np.ndarray, labels: Optional[np.ndarray], title: s
     df = pd.DataFrame(projection, columns=["PC1", "PC2"] if projection.shape[1] >= 2 else ["PC1"])  # type: ignore
     if labels is not None:
         df.insert(0, "label", labels)
-        hover_data = {"label": True}
-    else:
-        hover_data = None
+    
+    try:
+        if projection.shape[1] >= 2:
+            fig = px.scatter(df, x="PC1", y="PC2", text=(df["label"] if "label" in df.columns else None), title=title)
+            fig.update_traces(textposition="top center")
+        else:
+            # Single-component fallback: show as bar chart
+            fig = px.bar(df, x=df.index, y="PC1", text=(df["label"] if "label" in df.columns else None), title=title)
 
-    if projection.shape[1] >= 2:
-        fig = px.scatter(df, x="PC1", y="PC2", text=(df["label"] if "label" in df.columns else None), title=title)
-        fig.update_traces(textposition="top center")
-    else:
-        # Single-component fallback: show as bar chart
-        fig = px.bar(df, x=df.index, y="PC1", text=(df["label"] if "label" in df.columns else None), title=title)
-
-    fig.update_layout(width=800, height=600)
-    return fig
+        fig.update_layout(width=800, height=600)
+        return fig
+    except Exception as e:
+        # Record the error for diagnostics and return None so the caller can fallback
+        plot_diagnostics.append(f"draw_pca_plot error: {e}")
+        return None
 
 
 st.set_page_config(page_title="ESM-2 FASTA PCA", page_icon="🧬", layout="wide")
@@ -223,7 +229,23 @@ if uploaded_file is not None:
                         fig.data[0].marker.color = clusters
                     except Exception:
                         pass
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Attempt to display the Plotly figure; on failure try HTML embed or table fallback
+                    try:
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        plot_diagnostics.append(f"st.plotly_chart error (uploaded): {e}")
+                        try:
+                            tmp_html = Path(tempfile.gettempdir()) / "pca_plot_uploaded.html"
+                            fig.write_html(str(tmp_html))
+                            html_str = tmp_html.read_text(encoding="utf-8")
+                            components.html(html_str, height=600)
+                        except Exception as e2:
+                            plot_diagnostics.append(f"fig.write_html/embed error (uploaded): {e2}")
+                            st.warning("Could not render interactive Plotly figure; showing PCA coordinates table instead.")
+                            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                            pca_tbl.insert(0, "label", list(headers))
+                            pca_tbl["cluster"] = clusters
+                            st.dataframe(pca_tbl)
                 else:
                     pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
                     pca_tbl.insert(0, "label", list(headers))
@@ -273,7 +295,23 @@ elif use_example:
                         fig.data[0].marker.color = clusters
                     except Exception:
                         pass
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Attempt to display the Plotly figure; on failure try HTML embed or table fallback
+                    try:
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        plot_diagnostics.append(f"st.plotly_chart error (example): {e}")
+                        try:
+                            tmp_html = Path(tempfile.gettempdir()) / "pca_plot_example.html"
+                            fig.write_html(str(tmp_html))
+                            html_str = tmp_html.read_text(encoding="utf-8")
+                            components.html(html_str, height=600)
+                        except Exception as e2:
+                            plot_diagnostics.append(f"fig.write_html/embed error (example): {e2}")
+                            st.warning("Could not render interactive Plotly figure; showing PCA coordinates table instead.")
+                            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                            pca_tbl.insert(0, "label", list(headers))
+                            pca_tbl["cluster"] = clusters
+                            st.dataframe(pca_tbl)
                 else:
                     pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
                     pca_tbl.insert(0, "label", list(headers))
@@ -298,3 +336,32 @@ elif use_example:
 
 else:
     st.info("Upload a FASTA file to begin, or click 'Use example FASTA'. The app will compute k-mer features, run PCA, and display the results.")
+
+# Advanced diagnostics for plotting
+with st.expander("Advanced: Plot diagnostics (click to expand)"):
+    st.write({
+        "PLOTLY_AVAILABLE": PLOTLY_AVAILABLE,
+    })
+    # Versions
+    try:
+        import plotly
+        st.write("plotly", plotly.__version__)
+    except Exception:
+        st.write("plotly: not available")
+    try:
+        import sklearn
+        st.write("scikit-learn", sklearn.__version__)
+    except Exception:
+        st.write("scikit-learn: not available")
+    try:
+        import numpy as _np
+        st.write("numpy", _np.__version__)
+    except Exception:
+        st.write("numpy: not available")
+
+    if plot_diagnostics:
+        st.subheader("Recent plot errors and diagnostics")
+        for d in plot_diagnostics[-20:]:
+            st.write(d)
+    else:
+        st.write("No plot diagnostics recorded yet.")
