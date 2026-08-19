@@ -113,11 +113,11 @@ st.caption("Upload a FASTA file to get ESM-2 embeddings and a PCA projection for
 
 with st.sidebar:
     st.subheader("Settings")
-    # Replace ESM-2 options with k-mer featureization settings
-    k = st.slider("k-mer length", min_value=1, max_value=6, value=3)
+    # Use fixed 3-mer features for the demo (k=3). Remove interactive k selection to simplify UI.
+    k = 3
     n_components = st.slider("PCA components", min_value=2, max_value=5, value=2)
     n_clusters = st.slider("Number of clusters (for coloring)", min_value=1, max_value=10, value=3)
-    st.caption("K-mer featureization (protein sequences). PCA is computed from k-mer frequencies.")
+    st.caption("Using 3-mer (k=3) featureization. PCA is computed from k-mer frequencies.")
 
 uploaded_file = st.file_uploader("Drop a FASTA file here", type=["fasta", "fa", "faa", "txt"]) 
 # Provide a quick example option that uses the included ha_random_20_cow_chicken_human.fasta in the repo
