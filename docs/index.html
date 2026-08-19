@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESM-2 FASTA PCA Demo</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --panel-2: #1f2937;
+        --text: #e5e7eb;
+        --muted: #cbd5e1;
+        --accent: #67e8f9;
+        --accent-2: #a78bfa;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, var(--bg), var(--panel-2));
+        color: var(--text);
+      }
+      .container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 48px 20px 72px;
+      }
+      h1 {
+        font-size: 2.5rem;
+        margin-bottom: 16px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .card {
+        background: rgba(17, 24, 39, 0.9);
+        border: 1px solid rgba(103, 232, 249, 0.25);
+        border-radius: 12px;
+        padding: 24px 20px;
+        margin-top: 24px;
+      }
+      code {
+        background: rgba(255,255,255,0.05);
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      a.button {
+        display: inline-block;
+        margin-top: 12px;
+        padding: 12px 18px;
+        border-radius: 10px;
+        text-decoration: none;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: #0f172a;
+        font-weight: bold;
+      }
+      ul {
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>ESM-2 FASTA PCA Demo</h1>
+      <p>
+        Upload a FASTA file, extract mean-pooled ESM-2 embeddings, and generate a PCA plot for downstream ML or visualization.
+      </p>
+
+      <div class="card">
+        <h2>Demo FASTA</h2>
+        <p>
+          A sample 20-sequence FASTA is included in the repository:
+          <code>example_20_sequences.fasta</code>
+        </p>
+        <a class="button" href="../example_20_sequences.fasta" download>Download Example FASTA</a>
+      </div>
+
+      <div class="card">
+        <h2>App</h2>
+        <p>
+          The actual interactive app is a Python/Streamlit application and cannot run directly on GitHub Pages.
+          The GitHub Pages site is the landing page, while the app itself should be deployed with Streamlit Cloud, Hugging Face Spaces, or another Python host.
+        </p>
+        <a class="button" href="https://streamlit.io/cloud" target="_blank" rel="noopener noreferrer">Deploy Streamlit App</a>
+      </div>
+
+      <div class="card">
+        <h2>Local run</h2>
+        <ul>
+          <li>conda activate esm2-env</li>
+          <li>streamlit run app.py</li>
+          <li>Open http://localhost:8501</li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>

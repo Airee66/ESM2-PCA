@@ -1,0 +1,38 @@
+# Conda environment for extracting ESM-2 embeddings
+# Python 3.9 chosen for broad compatibility with ESM tooling (ESMFold and related examples)
+# Instructions:
+# - Create the environment: conda env create -f environment.yml
+# - Activate: conda activate esm2-env
+# - If you need a GPU-enabled PyTorch, edit/remove the `cudatoolkit` line to match your CUDA version (or use the commented GPU section below), then run `conda env update -f environment.yml` or recreate the env.
+
+name: esm2-env
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  # Install PyTorch from the pytorch channel. By default this will install a CPU build.
+  # For GPU, set cudatoolkit to a version that matches your CUDA driver (e.g., cudatoolkit=11.8).
+  - pytorch
+  # Uncomment and set cudatoolkit if you want a CUDA-enabled PyTorch via conda:
+  # - cudatoolkit=11.8
+  - pip:
+    - fair-esm
+    # fair-esm pulls the ESM model code and utilities
+
+# Example GPU alternative (uncomment and adjust):
+# channels:
+#   - defaults
+#   - conda-forge
+#   - pytorch
+# dependencies:
+#   - python=3.9
+#   - pip
+#   - numpy
+#   - pytorch
+#   - cudatoolkit=11.8
+#   - pip:
+#     - fair-esm

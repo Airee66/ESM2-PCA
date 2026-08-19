@@ -1,0 +1,8 @@
+# Minimal requirements to run the ESM-2 embedding extraction and PCA scripts
+fair-esm
+torch
+numpy
+scikit-learn
+matplotlib
+pandas
+streamlit
