@@ -186,77 +186,101 @@ elif use_example:
     # Prefer using a cached precomputed PCA + embeddings for the example to avoid running the model on cloud hosts.
     cache_dir = REPO_ROOT / "example_cache"
     if cache_dir.exists():
-        st.success("Using cached PCA results for the example FASTA (no model run).")
-        # Show cached PCA plot if available (defensive display to avoid runtime errors on some hosts)
+        st.success("Using cached PCA inputs for the example FASTA — PCA will be recomputed from cached embeddings so the slider affects the plot.")
+        emb_npy = cache_dir / "embeddings.npy"
+        labels_csv = cache_dir / "labels.csv"
+        if not emb_npy.exists():
+            st.error("Cached embeddings not found; cannot run PCA on the example.")
+        else:
+            # Load cached embeddings and labels, then run PCA dynamically so interactive controls work
+            try:
+                X = np.load(emb_npy)
+            except Exception as e:
+                st.error(f"Failed to load cached embeddings: {e}")
+                X = None
+
+            labels = None
+            if labels_csv.exists():
+                try:
+                    labels = np.genfromtxt(labels_csv, dtype=str, delimiter=",", comments=None)
+                    if labels.size == 1 and labels.shape == ():
+                        labels = np.array([str(labels)])
+                except Exception:
+                    labels = None
+
+            if X is not None:
+                # Allow user to recompute PCA with the current n_components slider
+                try:
+                    if X.shape[0] < 2:
+                        st.warning("At least two sequences are required for PCA.")
+                    else:
+                        with st.spinner("Computing PCA from cached embeddings..."):
+                            projection, variance = compute_pca(X, n_components=n_components)
+
+                        fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of example (recomputed)")
+                        if fig is not None:
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
+                            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                            if labels is not None:
+                                pca_tbl.insert(0, "label", labels.tolist())
+                            st.dataframe(pca_tbl)
+
+                        st.subheader("PCA results (recomputed)")
+                        st.write("Explained variance ratios:")
+                        variance_df = pd.DataFrame({
+                            "Component": [f"PC{i+1}" for i in range(len(variance))],
+                            "ExplainedVarianceRatio": variance,
+                        })
+                        st.dataframe(variance_df, use_container_width=True)
+
+                        pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                        if labels is not None:
+                            pca_df.insert(0, "label", labels.tolist())
+
+                        st.download_button(
+                            label="Download PCA coordinates (.csv)",
+                            data=pca_df.to_csv(index=False),
+                            file_name="example_esm2_pca_projection_recomputed.csv",
+                            mime="text/csv",
+                        )
+
+                        # Provide embeddings and labels downloads
+                        emb_csv_text = pd.DataFrame(X).to_csv(index=False)
+                        st.download_button(
+                            label="Download cached embeddings (.csv)",
+                            data=emb_csv_text,
+                            file_name="example_esm2_embeddings.csv",
+                            mime="text/csv",
+                        )
+                        if labels is not None:
+                            st.download_button(
+                                label="Download cached labels (.csv)",
+                                data=labels_csv.read_text(encoding="utf-8"),
+                                file_name="example_esm2_labels.csv",
+                                mime="text/csv",
+                            )
+                except Exception as e:
+                    st.exception(e)
+
+        # Also keep the static cached PNG available as a fallback
         plot_path = cache_dir / "pca_plot.png"
         if plot_path.exists():
             try:
-                # Try passing the file path (works in most environments)
+                st.markdown("**Cached static PCA plot (fallback):**")
                 st.image(str(plot_path), caption="PCA plot (cached)", use_container_width=True)
             except Exception:
                 try:
-                    # Fall back to reading bytes and passing bytes to st.image
                     img_bytes = plot_path.read_bytes()
                     st.image(img_bytes, caption="PCA plot (cached)", use_container_width=True)
-                except Exception as e:
-                    st.warning(f"Could not display cached PCA image: {e}")
-                    # Offer the file for download as a last resort
-                    try:
-                        data_bytes = plot_path.read_bytes()
-                        st.download_button(
-                            label="Download cached PCA plot (PNG)",
-                            data=data_bytes,
-                            file_name=plot_path.name,
-                            mime="image/png",
-                        )
-                    except Exception:
-                        st.write(f"Cached PCA plot available at: {plot_path}")
-
-        # Show PCA projection table if available
-        proj_csv = cache_dir / "pca_projection.csv"
-        if proj_csv.exists():
-            pca_df = pd.read_csv(proj_csv)
-            st.subheader("PCA projection (cached)")
-            st.dataframe(pca_df, use_container_width=True)
-            st.download_button(
-                label="Download cached PCA coordinates (.csv)",
-                data=proj_csv.read_text(encoding="utf-8"),
-                file_name="example_esm2_pca_projection.csv",
-                mime="text/csv",
-            )
-
-        # Show explained variance if available
-        var_csv = cache_dir / "pca_variance.csv"
-        if var_csv.exists():
-            var_df = pd.read_csv(var_csv)
-            st.subheader("Explained variance (cached)")
-            st.dataframe(var_df, use_container_width=True)
-            st.download_button(
-                label="Download cached explained variance (.csv)",
-                data=var_csv.read_text(encoding="utf-8"),
-                file_name="example_esm2_pca_variance.csv",
-                mime="text/csv",
-            )
-
-        # Provide embeddings download (convert .npy to CSV on the fly for convenience)
-        emb_npy = cache_dir / "embeddings.npy"
-        labels_csv = cache_dir / "labels.csv"
-        if emb_npy.exists():
-            X = np.load(emb_npy)
-            emb_csv_text = pd.DataFrame(X).to_csv(index=False)
-            st.download_button(
-                label="Download cached embeddings (.csv)",
-                data=emb_csv_text,
-                file_name="example_esm2_embeddings.csv",
-                mime="text/csv",
-            )
-        if labels_csv.exists():
-            st.download_button(
-                label="Download cached labels (.csv)",
-                data=labels_csv.read_text(encoding="utf-8"),
-                file_name="example_esm2_labels.csv",
-                mime="text/csv",
-            )
+                except Exception:
+                    st.download_button(
+                        label="Download cached PCA plot (PNG)",
+                        data=plot_path.read_bytes(),
+                        file_name=plot_path.name,
+                        mime="image/png",
+                    )
     else:
         # Fallback: if cache missing, run the extractor as before
         example_src = REPO_ROOT / "ha_random_20_cow_chicken_human.fasta"
