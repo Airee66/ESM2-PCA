@@ -113,186 +113,188 @@ st.caption("Upload a FASTA file to get ESM-2 embeddings and a PCA projection for
 
 with st.sidebar:
     st.subheader("Settings")
-    model_name = st.selectbox("Model", ["esm2_t6_8M_UR50D"], index=0)
+    # Replace ESM-2 options with k-mer featureization settings
+    k = st.slider("k-mer length", min_value=1, max_value=6, value=3)
     n_components = st.slider("PCA components", min_value=2, max_value=5, value=2)
-    st.caption(f"Using {model_name} with mean-pooled sequence embeddings.")
+    n_clusters = st.slider("Number of clusters (for coloring)", min_value=1, max_value=10, value=3)
+    st.caption("K-mer featureization (protein sequences). PCA is computed from k-mer frequencies.")
 
-uploaded_file = st.file_uploader("Drop a FASTA file here", type=["fasta", "fa", "faa", "txt"])
+uploaded_file = st.file_uploader("Drop a FASTA file here", type=["fasta", "fa", "faa", "txt"]) 
 # Provide a quick example option that uses the included ha_random_20_cow_chicken_human.fasta in the repo
 use_example = st.button("Use example FASTA (ha_random_20, 60 sequences)")
 
-# Helper to process a fasta file path (already on disk) and run the same pipeline as the uploader
-def _process_fasta_on_disk(fasta_path: Path, display_name: str):
-    output_dir = fasta_path.parent / "esm2_out"
-    try:
-        with st.spinner(f"Extracting ESM-2 embeddings from {display_name}..."):
-            X, labels = extract_fasta_embeddings(fasta_path, output_dir)
-        st.success(f"Extracted {X.shape[0]} sequences with embedding dimension {X.shape[1]}.")
+# Helper functions for FASTA parsing, k-mer featurization, and simple clustering
 
-        if X.shape[0] < 2:
-            st.warning("At least two sequences are needed for PCA.")
-            return
-
-        with st.spinner("Running PCA..."):
-            projection, variance = compute_pca(X, n_components=n_components)
-
-        fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of {display_name}")
-        if fig is not None:
-            st.plotly_chart(fig, use_container_width=True)
+def read_fasta(path: Path):
+    records = []
+    header = None
+    seq_lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(">"):
+            if header is not None:
+                records.append((header, "".join(seq_lines)))
+            header = line[1:].strip()
+            seq_lines = []
         else:
-            st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
-            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-            if labels is not None:
-                pca_tbl.insert(0, "label", labels.tolist())
-            st.dataframe(pca_tbl)
+            seq_lines.append(line.upper())
+    if header is not None:
+        records.append((header, "".join(seq_lines)))
+    return records
 
-        st.subheader("PCA results")
-        st.write("Explained variance ratios:")
-        variance_df = pd.DataFrame({
-            "Component": [f"PC{i+1}" for i in range(len(variance))],
-            "ExplainedVarianceRatio": variance,
-        })
-        st.dataframe(variance_df, use_container_width=True)
 
-        pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-        if labels is not None:
-            pca_df.insert(0, "label", labels.tolist())
-        st.download_button(
-            label="Download PCA coordinates (.csv)",
-            data=pca_df.to_csv(index=False),
-            file_name="esm2_pca_projection.csv",
-            mime="text/csv",
-        )
-        st.download_button(
-            label="Download embeddings (.csv)",
-            data=pd.DataFrame(X).to_csv(index=False),
-            file_name="esm2_embeddings.csv",
-            mime="text/csv",
-        )
+def compute_kmer_matrix(seqs, k=3):
+    # seqs: list of sequences (strings)
+    n = len(seqs)
+    kmer_counts_list = []
+    kmer_set = set()
+    for s in seqs:
+        s = s.upper()
+        counts = {}
+        L = len(s)
+        for i in range(0, max(0, L - k + 1)):
+            kmer = s[i:i+k]
+            if not kmer.isalpha():
+                continue
+            counts[kmer] = counts.get(kmer, 0) + 1
+            kmer_set.add(kmer)
+        kmer_counts_list.append((counts, max(1, L - k + 1)))
+    kmers = sorted(kmer_set)
+    X = np.zeros((n, len(kmers)), dtype=float)
+    for i, (counts, denom) in enumerate(kmer_counts_list):
+        for j, kmer in enumerate(kmers):
+            X[i, j] = counts.get(kmer, 0) / denom
+    return X, kmers
 
-    except subprocess.CalledProcessError as exc:
-        st.error(f"ESM extraction failed. Please check the FASTA input and model availability. Exit code: {exc.returncode}")
-    except Exception as exc:
-        st.exception(exc)
 
+def compute_clusters(X, n_clusters=3):
+    # Try scikit-learn's KMeans first, fallback to a simple numpy implementation
+    if n_clusters <= 1:
+        return np.zeros(X.shape[0], dtype=int)
+    try:
+        from sklearn.cluster import KMeans
+        km = KMeans(n_clusters=n_clusters, random_state=0)
+        labels = km.fit_predict(X)
+        return labels
+    except Exception:
+        # Simple k-means (Lloyd) with random init
+        rng = np.random.default_rng(0)
+        n_samples = X.shape[0]
+        # initialize centroids by sampling points
+        centroids = X[rng.choice(n_samples, size=n_clusters, replace=False)]
+        for _ in range(100):
+            dists = np.linalg.norm(X[:, None, :] - centroids[None, :, :], axis=2)
+            assigns = dists.argmin(axis=1)
+            new_centroids = np.array([X[assigns == i].mean(axis=0) if np.any(assigns == i) else centroids[i] for i in range(n_clusters)])
+            if np.allclose(new_centroids, centroids):
+                break
+            centroids = new_centroids
+        return assigns
+
+
+# Processing flows: uploaded FASTA or example FASTA
 if uploaded_file is not None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         fasta_path = tmpdir_path / uploaded_file.name
         fasta_path.write_text(uploaded_file.getvalue().decode("utf-8", errors="ignore"), encoding="utf-8")
-        _process_fasta_on_disk(fasta_path, uploaded_file.name)
+        records = read_fasta(fasta_path)
+        headers, seqs = zip(*records) if records else ([], [])
+        if len(seqs) == 0:
+            st.error("No sequences found in uploaded FASTA.")
+        else:
+            with st.spinner("Computing k-mer features..."):
+                X, kmers = compute_kmer_matrix(list(seqs), k=k)
+            st.success(f"Computed k={k} k-mer features: matrix shape {X.shape}.")
+
+            if X.shape[0] < 2:
+                st.warning("At least two sequences are needed for PCA.")
+            else:
+                with st.spinner("Running PCA..."):
+                    projection, variance = compute_pca(X, n_components=n_components)
+                # clustering for coloring
+                clusters = compute_clusters(X, n_clusters=n_clusters)
+                fig = draw_pca_plot(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of {uploaded_file.name}")
+                if fig is not None:
+                    # add cluster coloring
+                    try:
+                        fig.data[0].marker.color = clusters
+                    except Exception:
+                        pass
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                    pca_tbl.insert(0, "label", list(headers))
+                    pca_tbl["cluster"] = clusters
+                    st.dataframe(pca_tbl)
+
+                st.subheader("PCA results")
+                st.write("Explained variance ratios:")
+                variance_df = pd.DataFrame({
+                    "Component": [f"PC{i+1}" for i in range(len(variance))],
+                    "ExplainedVarianceRatio": variance,
+                })
+                st.dataframe(variance_df, use_container_width=True)
+
+                # download outputs
+                pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                pca_df.insert(0, "label", list(headers))
+                pca_df["cluster"] = clusters
+                st.download_button(label="Download PCA coordinates (.csv)", data=pca_df.to_csv(index=False), file_name="kmer_pca_projection.csv", mime="text/csv")
+                emb_df = pd.DataFrame(X, columns=kmers)
+                emb_df.insert(0, "label", list(headers))
+                st.download_button(label="Download k-mer features (.csv)", data=emb_df.to_csv(index=False), file_name="kmer_features.csv", mime="text/csv")
 
 elif use_example:
-    # Prefer using a cached precomputed PCA + embeddings for the example to avoid running the model on cloud hosts.
-    cache_dir = REPO_ROOT / "example_cache"
-    if cache_dir.exists():
-        st.success("Using cached PCA inputs for the example FASTA — PCA will be recomputed from cached embeddings so the slider affects the plot.")
-        emb_npy = cache_dir / "embeddings.npy"
-        labels_csv = cache_dir / "labels.csv"
-        if not emb_npy.exists():
-            st.error("Cached embeddings not found; cannot run PCA on the example.")
-        else:
-            # Load cached embeddings and labels, then run PCA dynamically so interactive controls work
-            try:
-                X = np.load(emb_npy)
-            except Exception as e:
-                st.error(f"Failed to load cached embeddings: {e}")
-                X = None
-
-            labels = None
-            if labels_csv.exists():
-                try:
-                    labels = np.genfromtxt(labels_csv, dtype=str, delimiter=",", comments=None)
-                    if labels.size == 1 and labels.shape == ():
-                        labels = np.array([str(labels)])
-                except Exception:
-                    labels = None
-
-            if X is not None:
-                # Allow user to recompute PCA with the current n_components slider
-                try:
-                    if X.shape[0] < 2:
-                        st.warning("At least two sequences are required for PCA.")
-                    else:
-                        with st.spinner("Computing PCA from cached embeddings..."):
-                            projection, variance = compute_pca(X, n_components=n_components)
-
-                        fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of example (recomputed)")
-                        if fig is not None:
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
-                            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-                            if labels is not None:
-                                pca_tbl.insert(0, "label", labels.tolist())
-                            st.dataframe(pca_tbl)
-
-                        st.subheader("PCA results (recomputed)")
-                        st.write("Explained variance ratios:")
-                        variance_df = pd.DataFrame({
-                            "Component": [f"PC{i+1}" for i in range(len(variance))],
-                            "ExplainedVarianceRatio": variance,
-                        })
-                        st.dataframe(variance_df, use_container_width=True)
-
-                        pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-                        if labels is not None:
-                            pca_df.insert(0, "label", labels.tolist())
-
-                        st.download_button(
-                            label="Download PCA coordinates (.csv)",
-                            data=pca_df.to_csv(index=False),
-                            file_name="example_esm2_pca_projection_recomputed.csv",
-                            mime="text/csv",
-                        )
-
-                        # Provide embeddings and labels downloads
-                        emb_csv_text = pd.DataFrame(X).to_csv(index=False)
-                        st.download_button(
-                            label="Download cached embeddings (.csv)",
-                            data=emb_csv_text,
-                            file_name="example_esm2_embeddings.csv",
-                            mime="text/csv",
-                        )
-                        if labels is not None:
-                            st.download_button(
-                                label="Download cached labels (.csv)",
-                                data=labels_csv.read_text(encoding="utf-8"),
-                                file_name="example_esm2_labels.csv",
-                                mime="text/csv",
-                            )
-                except Exception as e:
-                    st.exception(e)
-
-        # Also keep the static cached PNG available as a fallback
-        plot_path = cache_dir / "pca_plot.png"
-        if plot_path.exists():
-            try:
-                st.markdown("**Cached static PCA plot (fallback):**")
-                st.image(str(plot_path), caption="PCA plot (cached)", use_container_width=True)
-            except Exception:
-                try:
-                    img_bytes = plot_path.read_bytes()
-                    st.image(img_bytes, caption="PCA plot (cached)", use_container_width=True)
-                except Exception:
-                    st.download_button(
-                        label="Download cached PCA plot (PNG)",
-                        data=plot_path.read_bytes(),
-                        file_name=plot_path.name,
-                        mime="image/png",
-                    )
+    example_src = REPO_ROOT / "ha_random_20_cow_chicken_human.fasta"
+    if not example_src.exists():
+        st.error("Example FASTA not found in the repository. Please ensure ha_random_20_cow_chicken_human.fasta exists.")
     else:
-        # Fallback: if cache missing, run the extractor as before
-        example_src = REPO_ROOT / "ha_random_20_cow_chicken_human.fasta"
-        if not example_src.exists():
-            st.error("Example FASTA not found in the repository. Please ensure ha_random_20_cow_chicken_human.fasta exists.")
+        records = read_fasta(example_src)
+        headers, seqs = zip(*records) if records else ([], [])
+        if len(seqs) == 0:
+            st.error("No sequences found in example FASTA.")
         else:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmpdir_path = Path(tmpdir)
-                fasta_path = tmpdir_path / example_src.name
-                # copy the example fasta into a temp dir so extractor writes outputs there
-                fasta_path.write_text(example_src.read_text(encoding="utf-8"), encoding="utf-8")
-                _process_fasta_on_disk(fasta_path, example_src.name)
+            with st.spinner("Computing k-mer features for example..."):
+                X, kmers = compute_kmer_matrix(list(seqs), k=k)
+            st.success(f"Computed k={k} k-mer features for example: matrix shape {X.shape}.")
+
+            if X.shape[0] < 2:
+                st.warning("At least two sequences are needed for PCA.")
+            else:
+                with st.spinner("Running PCA..."):
+                    projection, variance = compute_pca(X, n_components=n_components)
+                clusters = compute_clusters(X, n_clusters=n_clusters)
+                fig = draw_pca_plot(projection, labels=np.array([str(h) for h in headers]), title=f"k={k} PCA of example")
+                if fig is not None:
+                    try:
+                        fig.data[0].marker.color = clusters
+                    except Exception:
+                        pass
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                    pca_tbl.insert(0, "label", list(headers))
+                    pca_tbl["cluster"] = clusters
+                    st.dataframe(pca_tbl)
+
+                st.subheader("PCA results")
+                st.write("Explained variance ratios:")
+                variance_df = pd.DataFrame({
+                    "Component": [f"PC{i+1}" for i in range(len(variance))],
+                    "ExplainedVarianceRatio": variance,
+                })
+                st.dataframe(variance_df, use_container_width=True)
+
+                pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+                pca_df.insert(0, "label", list(headers))
+                pca_df["cluster"] = clusters
+                st.download_button(label="Download PCA coordinates (.csv)", data=pca_df.to_csv(index=False), file_name="kmer_pca_projection_example.csv", mime="text/csv")
+                emb_df = pd.DataFrame(X, columns=kmers)
+                emb_df.insert(0, "label", list(headers))
+                st.download_button(label="Download k-mer features (.csv)", data=emb_df.to_csv(index=False), file_name="kmer_features_example.csv", mime="text/csv")
 
 else:
-    st.info("Upload a FASTA file to begin, or click 'Use example FASTA (20 sequences)'. The app will compute mean-pooled ESM-2 embeddings, run PCA, and display the results.")
+    st.info("Upload a FASTA file to begin, or click 'Use example FASTA'. The app will compute k-mer features, run PCA, and display the results.")
