@@ -192,12 +192,12 @@ elif use_example:
         if plot_path.exists():
             try:
                 # Try passing the file path (works in most environments)
-                st.image(str(plot_path), caption="PCA plot (cached)", use_column_width=True)
+                st.image(str(plot_path), caption="PCA plot (cached)", use_container_width=True)
             except Exception:
                 try:
                     # Fall back to reading bytes and passing bytes to st.image
                     img_bytes = plot_path.read_bytes()
-                    st.image(img_bytes, caption="PCA plot (cached)", use_column_width=True)
+                    st.image(img_bytes, caption="PCA plot (cached)", use_container_width=True)
                 except Exception as e:
                     st.warning(f"Could not display cached PCA image: {e}")
                     # Offer the file for download as a last resort
