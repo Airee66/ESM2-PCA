@@ -7,3 +7,8 @@ matplotlib
 pandas
 streamlit
 plotly
+
+# Ensure matplotlib and scikit-learn are explicitly requested for Streamlit Cloud
+# (these are required for the PNG fallback and PCA computation)
+scikit-learn
+matplotlib
