@@ -118,63 +118,81 @@ with st.sidebar:
     st.caption(f"Using {model_name} with mean-pooled sequence embeddings.")
 
 uploaded_file = st.file_uploader("Drop a FASTA file here", type=["fasta", "fa", "faa", "txt"])
+# Provide a quick example option that uses the included example_20_sequences.fasta in the repo
+use_example = st.button("Use example FASTA (20 sequences)")
+
+# Helper to process a fasta file path (already on disk) and run the same pipeline as the uploader
+def _process_fasta_on_disk(fasta_path: Path, display_name: str):
+    output_dir = fasta_path.parent / "esm2_out"
+    try:
+        with st.spinner(f"Extracting ESM-2 embeddings from {display_name}..."):
+            X, labels = extract_fasta_embeddings(fasta_path, output_dir)
+        st.success(f"Extracted {X.shape[0]} sequences with embedding dimension {X.shape[1]}.")
+
+        if X.shape[0] < 2:
+            st.warning("At least two sequences are needed for PCA.")
+            return
+
+        with st.spinner("Running PCA..."):
+            projection, variance = compute_pca(X, n_components=n_components)
+
+        fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of {display_name}")
+        if fig is not None:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
+            pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+            if labels is not None:
+                pca_tbl.insert(0, "label", labels.tolist())
+            st.dataframe(pca_tbl)
+
+        st.subheader("PCA results")
+        st.write("Explained variance ratios:")
+        variance_df = pd.DataFrame({
+            "Component": [f"PC{i+1}" for i in range(len(variance))],
+            "ExplainedVarianceRatio": variance,
+        })
+        st.dataframe(variance_df, use_container_width=True)
+
+        pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
+        if labels is not None:
+            pca_df.insert(0, "label", labels.tolist())
+        st.download_button(
+            label="Download PCA coordinates (.csv)",
+            data=pca_df.to_csv(index=False),
+            file_name="esm2_pca_projection.csv",
+            mime="text/csv",
+        )
+        st.download_button(
+            label="Download embeddings (.csv)",
+            data=pd.DataFrame(X).to_csv(index=False),
+            file_name="esm2_embeddings.csv",
+            mime="text/csv",
+        )
+
+    except subprocess.CalledProcessError as exc:
+        st.error(f"ESM extraction failed. Please check the FASTA input and model availability. Exit code: {exc.returncode}")
+    except Exception as exc:
+        st.exception(exc)
 
 if uploaded_file is not None:
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir_path = Path(tmpdir)
         fasta_path = tmpdir_path / uploaded_file.name
         fasta_path.write_text(uploaded_file.getvalue().decode("utf-8", errors="ignore"), encoding="utf-8")
-        output_dir = tmpdir_path / "esm2_out"
+        _process_fasta_on_disk(fasta_path, uploaded_file.name)
 
-        try:
-            with st.spinner("Extracting ESM-2 embeddings from the uploaded FASTA..."):
-                X, labels = extract_fasta_embeddings(fasta_path, output_dir)
-            st.success(f"Extracted {X.shape[0]} sequences with embedding dimension {X.shape[1]}.")
+elif use_example:
+    example_src = REPO_ROOT / "example_20_sequences.fasta"
+    if not example_src.exists():
+        st.error("Example FASTA not found in the repository. Please ensure example_20_sequences.fasta exists.")
+    else:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            fasta_path = tmpdir_path / example_src.name
+            # copy the example fasta into a temp dir so extractor writes outputs there
+            fasta_path.write_text(example_src.read_text(encoding="utf-8"), encoding="utf-8")
+            _process_fasta_on_disk(fasta_path, example_src.name)
 
-            if X.shape[0] < 2:
-                st.warning("At least two sequences are needed for PCA.")
-                st.stop()
-
-            with st.spinner("Running PCA..."):
-                projection, variance = compute_pca(X, n_components=n_components)
-
-            fig = draw_pca_plot(projection, labels, f"ESM-2 PCA of {uploaded_file.name}")
-            if fig is not None:
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("Plotly is not available in this environment; showing PCA coordinates as a table instead.")
-                pca_tbl = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-                if labels is not None:
-                    pca_tbl.insert(0, "label", labels.tolist())
-                st.dataframe(pca_tbl)
-
-            st.subheader("PCA results")
-            st.write("Explained variance ratios:")
-            variance_df = pd.DataFrame({
-                "Component": [f"PC{i+1}" for i in range(len(variance))],
-                "ExplainedVarianceRatio": variance,
-            })
-            st.dataframe(variance_df, use_container_width=True)
-
-            pca_df = pd.DataFrame(projection, columns=[f"PC{i+1}" for i in range(projection.shape[1])])
-            if labels is not None:
-                pca_df.insert(0, "label", labels.tolist())
-            st.download_button(
-                label="Download PCA coordinates (.csv)",
-                data=pca_df.to_csv(index=False),
-                file_name="esm2_pca_projection.csv",
-                mime="text/csv",
-            )
-            st.download_button(
-                label="Download embeddings (.csv)",
-                data=pd.DataFrame(X).to_csv(index=False),
-                file_name="esm2_embeddings.csv",
-                mime="text/csv",
-            )
-
-        except subprocess.CalledProcessError as exc:
-            st.error(f"ESM extraction failed. Please check the FASTA input and model availability. Exit code: {exc.returncode}")
-        except Exception as exc:
-            st.exception(exc)
 else:
-    st.info("Upload a FASTA file to begin. The app will compute mean-pooled ESM-2 embeddings, run PCA, and display the results.")
+    st.info("Upload a FASTA file to begin, or click 'Use example FASTA (20 sequences)'. The app will compute mean-pooled ESM-2 embeddings, run PCA, and display the results.")
